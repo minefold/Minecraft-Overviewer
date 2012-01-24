@@ -43,7 +43,7 @@ def get_program_path():
 # does not require git, very likely to work everywhere
 def findGitHash():
     this_dir = get_program_path()
-    if os.path.exists(os.path.join(this_dir,".git")):
+    if os.path.isdir(os.path.join(this_dir,".git")):
         with open(os.path.join(this_dir,".git","HEAD")) as f:
             data = f.read().strip()
         if data.startswith("ref: "):
