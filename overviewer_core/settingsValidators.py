@@ -4,6 +4,7 @@ import os.path
 from collections import namedtuple
 
 import rendermodes
+import util
 from world import UPPER_LEFT, UPPER_RIGHT, LOWER_LEFT, LOWER_RIGHT
 
 class ValidationException(Exception):
@@ -42,6 +43,13 @@ def checkBadEscape(s):
         fixed = True
     return (fixed, fixed_string)
 
+def validateMarkers(filterlist):
+    if type(filterlist) != list:
+        raise ValidationException("Markers must specify a list of filters")
+    for x in filterlist:
+        if not callable(x):
+            raise ValidationException("%r must be a function"% x)
+    return filterlist
 
 def validateWorldPath(worldpath):
     _, worldpath = checkBadEscape(worldpath)
@@ -183,7 +191,7 @@ def make_dictValidator(keyvalidator, valuevalidator):
     
     """
     def v(d):
-        newd = {}
+        newd = util.OrderedDict()
         for key, value in d.iteritems():
             newd[keyvalidator(key)] = valuevalidator(value)
         return newd
@@ -211,7 +219,7 @@ def make_configDictValidator(config, ignore_undefined=False):
 
     """
     def configDictValidator(d):
-        newdict = {}
+        newdict = util.OrderedDict()
 
         # values are config keys that the user specified that don't match any
         # valid key

@@ -22,6 +22,7 @@ attribute.
 """
 import functools
 import logging
+import cPickle
 
 class LRUCache(object):
     """A simple, generic, in-memory LRU cache that implements the standard
@@ -58,10 +59,10 @@ class LRUCache(object):
         """
         self.cache = {}
 
-        self.listhead = LRUCache._LinkNode()
-        self.listtail = LRUCache._LinkNode()
         # Two sentinel nodes at the ends of the linked list simplify boundary
         # conditions in the code below.
+        self.listhead = LRUCache._LinkNode()
+        self.listtail = LRUCache._LinkNode()
         self.listhead.right = self.listtail
         self.listtail.left = self.listhead
 
@@ -124,3 +125,43 @@ class LRUCache(object):
 
         cache[key] = link
 
+    def __delitem__(self, key):
+        # Used to flush the cache of this key
+        cache = self.cache
+        link = cache[key]
+        del cache[key]
+        link.left.right = link.right
+        link.right.left = link.left
+        
+        # Call the destructor
+        d = self.destructor
+        if d:
+            d(link.value)
+
+# memcached is an option, but unless your IO costs are really high, it just
+# ends up adding overhead and isn't worth it.
+try:
+    import memcache
+except ImportError:
+    class Memcached(object):
+        def __init__(*args):
+            raise ImportError("No module 'memcache' found. Please install python-memcached")
+else:
+    class Memcached(object):
+        def __init__(self, conn='127.0.0.1:11211'):
+            self.conn = conn
+            self.mc = memcache.Client([conn], debug=0, pickler=cPickle.Pickler, unpickler=cPickle.Unpickler)
+
+        def __getstate__(self):
+            return self.conn
+        def __setstate__(self, conn):
+            self.__init__(conn)
+
+        def __getitem__(self, key):
+            v = self.mc.get(key)
+            if not v:
+                raise KeyError()
+            return v
+
+        def __setitem__(self, key, value):
+            self.mc.set(key, value)

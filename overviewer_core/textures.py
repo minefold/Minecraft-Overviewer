@@ -213,7 +213,7 @@ class Textures(object):
                 if verbose: logging.info("Found %s in '%s'", filename, path)
                 return open(path, mode)
 
-        raise IOError("Could not find the file `{0}'. You can either place it in the same place as overviewer.py, use --textures-path, or install the Minecraft client.".format(filename))
+        raise IOError("Could not find the file `{0}'. Try specifying the 'texturepath' option in your config file. Set it to the directory where I can find {0}.".format(filename))
 
     def load_image(self, filename):
         """Returns an image object"""
@@ -290,7 +290,7 @@ class Textures(object):
         if hasattr(self, "lightcolor"):
             return self.lightcolor
         try:
-            lightcolor = list(_load_image("light_normal.png").getdata())
+            lightcolor = list(self.load_image("light_normal.png").getdata())
         except Exception:
             logging.warning("Light color image could not be found.")
             lightcolor = None
@@ -759,8 +759,18 @@ def grass(self, blockid, data):
 block(blockid=3, top_index=2)
 # cobblestone
 block(blockid=4, top_index=16)
-# wooden plank
-block(blockid=5, top_index=4)
+
+# wooden planks
+@material(blockid=5, data=range(4), solid=True)
+def wooden_planks(self, blockid, data):
+    if data == 0: # normal
+        return self.build_block(self.terrain_images[4],self.terrain_images[4])
+    if data == 1: # pine
+        return self.build_block(self.terrain_images[198],self.terrain_images[198])
+    if data == 2: # birch
+        return self.build_block(self.terrain_images[214],self.terrain_images[214])
+    if data == 3: # jungle wood
+        return self.build_block(self.terrain_images[199],self.terrain_images[199])
 
 @material(blockid=6, data=range(16), transparent=True)
 def saplings(self, blockid, data):
@@ -910,7 +920,16 @@ def furnaces(self, blockid, data):
         return self.build_full_block(top, None, None, side, side)
 
 # sandstone
-block(blockid=24, top_index=176, side_index=192)
+@material(blockid=24, data=range(3), solid=True)
+def wood(self, blockid, data):
+    top = self.terrain_images[176]
+    if data == 0: # normal
+        return self.build_block(top, self.terrain_images[192])
+    if data == 1: # hieroglyphic
+        return self.build_block(top, self.terrain_images[229])
+    if data == 2: # soft
+        return self.build_block(top, self.terrain_images[230])
+
 # note block
 block(blockid=25, top_index=74)
 
@@ -1472,6 +1491,9 @@ block(blockid=52, top_index=34, transparent=True)
 def stairs(self, blockid, data):
 
     # first, rotations
+    # preserve the upside-down bit
+    upside_down = data & 0x4
+    data = data & 0x3
     if self.rotation == 1:
         if data == 0: data = 2
         elif data == 1: data = 3
@@ -1487,6 +1509,7 @@ def stairs(self, blockid, data):
         elif data == 1: data = 2
         elif data == 2: data = 0
         elif data == 3: data = 1
+    data = data | upside_down
 
     if blockid == 53: # wooden
         texture = self.terrain_images[4]

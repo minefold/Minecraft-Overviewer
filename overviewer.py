@@ -35,6 +35,7 @@ import logging
 from optparse import OptionParser
 
 from overviewer_core import util
+from overviewer_core import logger
 from overviewer_core import textures
 from overviewer_core import optimizeimages, world
 from overviewer_core import configParser, tileset, assetmanager, dispatcher
@@ -44,52 +45,9 @@ helptext = """
 %prog [--rendermodes=...] [options] <World> <Output Dir>
 %prog --config=<config file> [options]"""
 
-def configure_logger(loglevel=logging.INFO, verbose=False):
-    """Configures the root logger to our liking
-
-    For a non-standard loglevel, pass in the level with which to configure the handler.
-
-    For a more verbose options line, pass in verbose=True
-
-    This function may be called more than once.
-
-    """
-
-    logger = logging.getLogger()
-
-    outstream = sys.stderr
-
-    if platform.system() == 'Windows':
-        # Our custom output stream processor knows how to deal with select ANSI
-        # color escape sequences
-        outstream = util.WindowsOutputStream()
-        formatter = util.ANSIColorFormatter(verbose)
-
-    elif sys.stderr.isatty():
-        # terminal logging with ANSI color
-        formatter = util.ANSIColorFormatter(verbose)
-
-    else:
-        # Let's not assume anything. Just text.
-        formatter = util.DumbFormatter(verbose)
-
-    if hasattr(logger, 'overviewerHandler'):
-        # we have already set up logging so just replace the formatter
-        # this time with the new values
-        logger.overviewerHandler.setFormatter(formatter)
-        logger.setLevel(loglevel)
-
-    else:
-        # Save our handler here so we can tell which handler was ours if the
-        # function is called again
-        logger.overviewerHandler = logging.StreamHandler(outstream)
-        logger.overviewerHandler.setFormatter(formatter)
-        logger.addHandler(logger.overviewerHandler)
-        logger.setLevel(loglevel)
-
 def main():
     # bootstrap the logger with defaults
-    configure_logger()
+    logger.configure()
 
     try:
         cpus = multiprocessing.cpu_count()
@@ -132,8 +90,8 @@ def main():
     options, args = parser.parse_args()
 
     # re-configure the logger now that we've processed the command line options
-    configure_logger(logging.INFO + 10*options.quiet - 10*options.verbose,
-            options.verbose > 0)
+    logger.configure(logging.INFO + 10*options.quiet - 10*options.verbose,
+                     options.verbose > 0)
 
     ##########################################################################
     # This section of main() runs in response to any one-time options we have,
@@ -236,7 +194,7 @@ dir but you forgot to put quotes around the directory, since it contains spaces.
             rendermodes = options.rendermodes.replace("-","_").split(",")
 
         # Now for some good defaults
-        renders = {}
+        renders = util.OrderedDict()
         for rm in rendermodes:
             renders["world-" + rm] = {
                     "world": "world",
@@ -267,9 +225,12 @@ dir but you forgot to put quotes around the directory, since it contains spaces.
         logging.exception("An error was encountered with your configuration. See the info below.")
         return 1
 
+       
 
     ############################################################
     # Final validation steps and creation of the destination directory
+    logging.info("Welcome to Minecraft Overviewer!")
+    logging.debug("Current log level: {0}".format(logging.getLogger().level))
 
     # Override some render configdict options depending on one-time command line
     # modifiers
@@ -330,13 +291,23 @@ dir but you forgot to put quotes around the directory, since it contains spaces.
             logging.exception("Could not create the output directory.")
             return 1
 
+    # The changelist support.
+    changelists = {}
+    for render in config['renders'].itervalues():
+        if 'changelist' in render:
+            path = render['changelist']
+            if path not in changelists:
+                out = open(path, "w")
+                logging.debug("Opening changelist %s (%s)", out, out.fileno())
+                changelists[path] = out
+            else:
+                out = changelists[path]
+            render['changelist'] = out.fileno()
+
 
     ########################################################################
     # Now we start the actual processing, now that all the configuration has
     # been gathered and validated
-    logging.info("Welcome to Minecraft Overviewer!")
-    logging.debug("Current log level: {0}".format(logging.getLogger().level))
-       
     # create our asset manager... ASSMAN
     assetMrg = assetmanager.AssetManager(destdir)
 
@@ -350,6 +321,8 @@ dir but you forgot to put quotes around the directory, since it contains spaces.
     # Set up the cache objects to use
     caches = []
     caches.append(cache.LRUCache(size=100))
+    if config.get("memcached_host", False):
+        caches.append(cache.Memcached(config['memcached_host']))
     # TODO: optionally more caching layers here
 
     renders = config['renders']
@@ -402,12 +375,11 @@ dir but you forgot to put quotes around the directory, since it contains spaces.
 
         # create our TileSet from this RegionSet
         tileset_dir = os.path.abspath(os.path.join(destdir, render_name))
-        if not os.path.exists(tileset_dir):
-            os.mkdir(tileset_dir)
 
         # only pass to the TileSet the options it really cares about
         render['name'] = render_name # perhaps a hack. This is stored here for the asset manager
-        tileSetOpts = util.dict_subset(render, ["name", "imgformat", "renderchecks", "rerenderprob", "bgcolor", "imgquality", "optimizeimg", "rendermode", "worldname_orig", "title", "dimension"])
+        tileSetOpts = util.dict_subset(render, ["name", "imgformat", "renderchecks", "rerenderprob", "bgcolor", "imgquality", "optimizeimg", "rendermode", "worldname_orig", "title", "dimension", "changelist"])
+        tileSetOpts.update({"spawn": w.find_true_spawn()}) # TODO find a better way to do this
         tset = tileset.TileSet(rset, assetMrg, tex, tileSetOpts, tileset_dir)
         tilesets.append(tset)
 
@@ -439,6 +411,10 @@ dir but you forgot to put quotes around the directory, since it contains spaces.
     dispatch.close()
 
     assetMrg.finalize(tilesets)
+
+    for out in changelists.itervalues():
+        logging.debug("Closing %s (%s)", out, out.fileno())
+        out.close()
 
     if config['processes'] == 1:
         logging.debug("Final cache stats:")
@@ -483,10 +459,10 @@ if __name__ == "__main__":
     multiprocessing.freeze_support()
     try:
         ret = main()
-        util.exit(ret)
+        util.nice_exit(ret)
     except Exception, e:
         logging.exception("""An error has occurred. This may be a bug. Please let us know!
 See http://docs.overviewer.org/en/latest/index.html#help
 
 This is the error that occurred:""")
-        util.exit(1)
+        util.nice_exit(1)

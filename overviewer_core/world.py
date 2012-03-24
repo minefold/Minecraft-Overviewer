@@ -18,6 +18,9 @@ import os
 import os.path
 from glob import glob
 import logging
+import hashlib
+import time
+import random
 
 import numpy
 
@@ -90,8 +93,16 @@ class World(object):
         if not os.path.exists(os.path.join(self.worlddir, "level.dat")):
             raise ValueError("level.dat not found in %s" % self.worlddir)
 
-        # Hard-code this to only work with format version 19133, "Anvil"
         data = nbt.load(os.path.join(self.worlddir, "level.dat"))[1]['Data']
+        # it seems that reading a level.dat file is unstable, particularly with respect
+        # to the spawnX,Y,Z variables.  So we'll try a few times to get a good reading
+        # empirically, it seems that 0,50,0 is a "bad" reading
+        # update: 0,50,0 is the default spawn, and may be valid is some cases
+        # more info is needed
+        data = nbt.load(os.path.join(self.worlddir, "level.dat"))[1]['Data']
+            
+
+        # Hard-code this to only work with format version 19133, "Anvil"
         if not ('version' in data and data['version'] == 19133):
             logging.critical("Sorry, This version of Minecraft-Overviewer only works with the 'Anvil' chunk format")
             raise ValueError("World at %s is not compatible with Overviewer" % self.worlddir)
@@ -162,7 +173,7 @@ class World(object):
         # location
 
         ## read spawn info from level.dat
-        data = self.data
+        data = self.leveldat
         disp_spawnX = spawnX = data['SpawnX']
         spawnY = data['SpawnY']
         disp_spawnZ = spawnZ = data['SpawnZ']
@@ -174,24 +185,34 @@ class World(object):
         ## clamp spawnY to a sane value, in-chunk value
         if spawnY < 0:
             spawnY = 0
-        if spawnY > 127:
-            spawnY = 127
+        if spawnY > 255:
+            spawnY = 255
         
         # Open up the chunk that the spawn is in
-        regionset = self.get_regionset(0)
+        regionset = self.get_regionset("overworld")
+        if not regionset:
+            return None
         try:
             chunk = regionset.get_chunk(chunkX, chunkZ)
         except ChunkDoesntExist:
             return (spawnX, spawnY, spawnZ)
+    
+        def getBlock(y):
+            "This is stupid and slow but I don't care"
+            targetSection = spawnY//16
+            for section in chunk['Sections']:
+                if section['Y'] == targetSection:
+                    blockArray = section['Blocks']
+                    return blockArray[inChunkX, inChunkZ, y % 16]
 
-        blockArray = chunk['Blocks']
+
 
         ## The block for spawn *within* the chunk
         inChunkX = spawnX - (chunkX*16)
         inChunkZ = spawnZ - (chunkZ*16)
 
         ## find the first air block
-        while (blockArray[inChunkX, inChunkZ, spawnY] != 0) and spawnY < 127:
+        while (getBlock(spawnY) != 0) and spawnY < 256:
             spawnY += 1
 
         return spawnX, spawnY, spawnZ
@@ -225,7 +246,7 @@ class RegionSet(object):
         # This is populated below. It is a mapping from (x,y) region coords to filename
         self.regionfiles = {}
 
-        # This holds up to 16 open regionfile objects
+        # This holds a cache of open regionfile objects
         self.regioncache = cache.LRUCache(size=16, destructor=lambda regionobj: regionobj.close())
         
         for x, y, regionfile in self._iterate_regionfiles():
@@ -258,6 +279,9 @@ class RegionSet(object):
             raise Exception("Woah, what kind of dimension is this?! %r" % self.regiondir)
 
     def _get_regionobj(self, regionfilename):
+        # Check the cache first. If it's not there, create the
+        # nbt.MCRFileReader object, cache it, and return it
+        # May raise an nbt.CorruptRegionError
         try:
             return self.regioncache[regionfilename]
         except KeyError:
@@ -296,8 +320,36 @@ class RegionSet(object):
         if regionfile is None:
             raise ChunkDoesntExist("Chunk %s,%s doesn't exist (and neither does its region)" % (x,z))
 
-        region = self._get_regionobj(regionfile)
-        data = region.load_chunk(x, z)
+        # Try a few times to load and parse this chunk before giving up and
+        # raising an error
+        tries = 5
+        while True:
+            try:
+                region = self._get_regionobj(regionfile)
+                data = region.load_chunk(x, z)
+            except nbt.CorruptionError, e:
+                tries -= 1
+                if tries > 0:
+                    # Flush the region cache to possibly read a new region file
+                    # header
+                    logging.debug("Encountered a corrupt chunk at %s,%s. Flushing cache and retrying", x, z)
+                    logging.debug("Error was:", exc_info=1)
+                    del self.regioncache[regionfile]
+                    time.sleep(0.5)
+                    continue
+                else:
+                    logging.warning("Tried several times to read chunk %d,%d. Giving up.",
+                            x, z, e)
+                    logging.debug("Full traceback:", exc_info=1)
+                    # Let this exception propagate out through the C code into
+                    # tileset.py, where it is caught and gracefully continues
+                    # with the next chunk
+                    raise
+            else:
+                # no exception raised: break out of the loop
+                break
+
+
         if data is None:
             raise ChunkDoesntExist("Chunk %s,%s doesn't exist" % (x,z))
 
@@ -375,7 +427,11 @@ class RegionSet(object):
         """
 
         for (regionx, regiony), regionfile in self.regionfiles.iteritems():
-            mcr = self._get_regionobj(regionfile)
+            try:
+                mcr = self._get_regionobj(regionfile)
+            except nbt.CorruptRegionError:
+                logging.warning("Found a corrupt region file at %s,%s. Skipping it.", regionx, regiony)
+                continue
             for chunkx, chunky in mcr.get_chunks():
                 yield chunkx+32*regionx, chunky+32*regiony, mcr.get_chunk_timestamp(chunkx, chunky)
 
@@ -389,7 +445,12 @@ class RegionSet(object):
         regionfile = self._get_region_path(x,z)
         if regionfile is None:
             return None
-        data = self._get_regionobj(regionfile)
+        try:
+            data = self._get_regionobj(regionfile)
+        except nbt.CorruptRegionError:
+            logging.warning("Ignoring request for chunk %s,%s; region %s,%s seems to be corrupt",
+                    x,z, x//32,z//32)
+            return None
         if data.chunk_exists(x,z):
             return data.get_chunk_timestamp(x,z)
         return None
@@ -511,7 +572,11 @@ class RotatedRegionSet(RegionSetWrapper):
                 array = numpy.swapaxes(array, 0,2)
                 section[arrayname] = array
         chunk_data['Sections'] = newsections
-        chunk_data['Biomes'] = numpy.rot90(chunk_data['Biomes'], self.north_dir)
+        
+        # same as above, for biomes (Z/X indexed)
+        biomes = numpy.swapaxes(chunk_data['Biomes'], 0, 1)
+        biomes = numpy.rot90(biomes, self.north_dir)
+        chunk_data['Biomes'] = numpy.swapaxes(biomes, 0, 1)
         return chunk_data
 
     def get_chunk_mtime(self, x, z):
@@ -578,17 +643,19 @@ class CachedRegionSet(RegionSetWrapper):
             s += obj.__class__.__name__ + "."
             obj = obj._r
         # obj should now be the actual RegionSet object
-        s += obj.regiondir
+        try:
+            s += obj.regiondir
+        except AttributeError:
+            s += repr(obj)
 
         logging.debug("Initializing a cache with key '%s'", s)
-        if len(s) > 32:
-            import hashlib
-            s = hashlib.md5(s).hexdigest()
+
+        s = hashlib.md5(s).hexdigest()
 
         self.key = s
 
     def get_chunk(self, x, z):
-        key = (self.key, x, z)
+        key = hashlib.md5(repr((self.key, x, z))).hexdigest()
         for i, cache in enumerate(self.caches):
             try:
                 retval = cache[key]

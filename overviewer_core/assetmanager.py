@@ -24,7 +24,7 @@ from PIL import Image
 
 import world
 import util
-import overviewer_version
+from files import FileReplacer, mirror_dir
 
 class AssetManager(object):
     """\
@@ -41,11 +41,6 @@ directory.
         """
         self.outputdir = outputdir
         self.renders = dict()
-
-        #  stores Points Of Interest to be mapped with markers
-        #  This is a dictionary of lists of dictionaries
-        #  Each regionset's name is a key in this dictionary
-        self.POI = dict()
 
         # look for overviewerConfig in self.outputdir
         try:
@@ -64,13 +59,6 @@ directory.
                 return conf
         return dict()
         
-
-
-    def found_poi(self, regionset, poi_type, contents, chunkX, chunkY):
-        if regionset.name not in self.POI.keys():
-            POI[regionset.name] = []
-        # TODO based on the type, so something
-        POI[regionset.name].append
 
     def initialize(self, tilesets):
         """Similar to finalize() but calls the tilesets' get_initial_data()
@@ -150,13 +138,19 @@ directory.
         global_assets = os.path.join(util.get_program_path(), "overviewer_core", "data", "web_assets")
         if not os.path.isdir(global_assets):
             global_assets = os.path.join(util.get_program_path(), "web_assets")
-        util.mirror_dir(global_assets, self.outputdir)
+        mirror_dir(global_assets, self.outputdir)
+
+		# write a dummy baseMarkers.js if none exists
+        if not os.path.exists(os.path.join(self.outputdir, "baseMarkers.js")):
+            with open(os.path.join(self.outputdir, "baseMarkers.js"), "w") as f:
+                f.write("// if you wants signs, please see genPOI.py\n");
+
 
         # create overviewer.js from the source js files
         js_src = os.path.join(util.get_program_path(), "overviewer_core", "data", "js_src")
         if not os.path.isdir(js_src):
             js_src = os.path.join(util.get_program_path(), "js_src")
-        with util.FileReplacer(os.path.join(self.outputdir, "overviewer.js")) as tmpfile:
+        with FileReplacer(os.path.join(self.outputdir, "overviewer.js")) as tmpfile:
             with open(tmpfile, "w") as fout:
                 # first copy in js_src/overviewer.js
                 with open(os.path.join(js_src, "overviewer.js"), 'r') as f:
@@ -169,7 +163,7 @@ directory.
         
         # write out config
         jsondump = json.dumps(dump, indent=4)
-        with util.FileReplacer(os.path.join(self.outputdir, "overviewerConfig.js")) as tmpfile:
+        with FileReplacer(os.path.join(self.outputdir, "overviewerConfig.js")) as tmpfile:
             with codecs.open(tmpfile, 'w', encoding='UTF-8') as f:
                 f.write("var overviewerConfig = " + jsondump + ";\n")
         
@@ -179,9 +173,9 @@ directory.
         index = codecs.open(indexpath, 'r', encoding='UTF-8').read()
         index = index.replace("{title}", "Minecraft Overviewer")
         index = index.replace("{time}", time.strftime("%a, %d %b %Y %H:%M:%S %Z", time.localtime()).decode(locale.getpreferredencoding()))
-        versionstr = "%s (%s)" % (overviewer_version.VERSION, overviewer_version.HASH[:7])
+        versionstr = "%s (%s)" % (util.findGitVersion(), util.findGitHash()[:7])
         index = index.replace("{version}", versionstr)
 
-        with util.FileReplacer(indexpath) as indexpath:
+        with FileReplacer(indexpath) as indexpath:
             with codecs.open(indexpath, 'w', encoding='UTF-8') as output:
                 output.write(index)
