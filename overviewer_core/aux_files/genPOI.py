@@ -24,6 +24,13 @@ from overviewer_core import logger
 from overviewer_core import nbt
 from overviewer_core import configParser, world
 
+def replaceBads(s):
+    "Replaces bad characters with good characters!"
+    bads = [" ", "(", ")"]
+    x=s
+    for bad in bads:
+        x = x.replace(bad,"_")
+    return x
 
 def handleSigns(rset, outputdir, render, rname):
 
@@ -57,7 +64,9 @@ def handlePlayers(rset, render, worldpath):
     playerdir = os.path.join(worldpath, "players")
     if os.path.isdir(playerdir):
         playerfiles = os.listdir(playerdir)
+        playerfiles = [x for x in playerfiles if x.endswith(".dat")]
         isSinglePlayer = False
+
     else:
         playerfiles = [os.path.join(worldpath, "level.dat")]
         isSinglePlayer = True
@@ -153,15 +162,18 @@ def main():
             return 1
       
         for f in render['markers']:
-            d = dict(icon="signpost_icon.png")
-            d.update(f)
-            markersets.add(((d['name'], d['filterFunction']), rset))
-            name = f['name'].replace(" ","_") + hex(hash(f['filterFunction']))[-4:] + "_" + hex(hash(rset))[-4:]
+            markersets.add(((f['name'], f['filterFunction']), rset))
+            name = replaceBads(f['name']) + hex(hash(f['filterFunction']))[-4:] + "_" + hex(hash(rset))[-4:]
+            to_append = dict(groupName=name, 
+                    displayName = f['name'], 
+                    icon=f.get('icon', 'signpost_icon.png'), 
+                    createInfoWindow=f.get('createInfoWindow',True),
+                    checked = f.get('checked', False))
             try:
                 l = markers[rname]
-                l.append(dict(groupName=name, displayName = f['name'], icon=d['icon']))
+                l.append(to_append)
             except KeyError:
-                markers[rname] = [dict(groupName=name, displayName=f['name'], icon=d['icon']),]
+                markers[rname] = [to_append]
 
         handleSigns(rset, os.path.join(destdir, rname), render, rname)
         handlePlayers(rset, render, worldpath)
@@ -174,21 +186,25 @@ def main():
         filter_name =     flter[0]
         filter_function = flter[1]
 
-        name = filter_name.replace(" ","_") + hex(hash(filter_function))[-4:] + "_" + hex(hash(rset))[-4:]
+        name = replaceBads(filter_name) + hex(hash(filter_function))[-4:] + "_" + hex(hash(rset))[-4:]
         markerSetDict[name] = dict(created=False, raw=[], name=filter_name)
         for poi in rset._pois['TileEntities']:
             result = filter_function(poi)
             if result:
-                d = dict(x=poi['x'], y=poi['y'], z=poi['z'], text=result, createInfoWindow=True)
+                d = dict(x=poi['x'], y=poi['y'], z=poi['z'], text=result)
                 if "icon" in poi:
                     d.update({"icon": poi['icon']})
+                if "createInfoWindow" in poi:
+                    d.update({"createInfoWindow": poi['createInfoWindow']})
                 markerSetDict[name]['raw'].append(d)
         for poi in rset._pois['Players']:
             result = filter_function(poi)
             if result:
-                d = dict(x=poi['x'], y=poi['y'], z=poi['z'], text=result, createInfoWindow=True)
+                d = dict(x=poi['x'], y=poi['y'], z=poi['z'], text=result)
                 if "icon" in poi:
                     d.update({"icon": poi['icon']})
+                if "createInfoWindow" in poi:
+                    d.update({"createInfoWindow": poi['createInfoWindow']})
                 markerSetDict[name]['raw'].append(d)
     #print markerSetDict
 

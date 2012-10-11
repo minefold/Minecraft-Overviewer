@@ -83,6 +83,8 @@ def main():
             help="Prints the location and hash of terrain.png, useful for debugging terrain.png problems")
     parser.add_option("-V", "--version", dest="version",
             help="Displays version information and then exits", action="store_true")
+    parser.add_option("--update-web-assets", dest='update_web_assets', action="store_true",
+            help="Update web assets. Will *not* render tiles or update overviewerConfig.js")
 
     # Log level options:
     parser.add_option("-q", "--quiet", dest="quiet", action="count", default=0,
@@ -334,6 +336,18 @@ dir but you forgot to put quotes around the directory, since it contains spaces.
             logging.exception("Could not create the output directory.")
             return 1
 
+    ########################################################################
+    # Now we start the actual processing, now that all the configuration has
+    # been gathered and validated
+    # create our asset manager... ASSMAN
+    assetMrg = assetmanager.AssetManager(destdir, config.get('customwebassets', None))
+
+    # If we've been asked to update web assets, do that and then exit 
+    if options.update_web_assets:
+        assetMrg.output_noconfig()
+        logging.info("Web assets have been updated")
+        return 0
+
     # The changelist support.
     changelists = {}
     for render in config['renders'].itervalues():
@@ -346,13 +360,6 @@ dir but you forgot to put quotes around the directory, since it contains spaces.
             else:
                 out = changelists[path]
             render['changelist'] = out.fileno()
-
-
-    ########################################################################
-    # Now we start the actual processing, now that all the configuration has
-    # been gathered and validated
-    # create our asset manager... ASSMAN
-    assetMrg = assetmanager.AssetManager(destdir)
 
     tilesets = []
 
@@ -421,9 +428,9 @@ dir but you forgot to put quotes around the directory, since it contains spaces.
 
         # only pass to the TileSet the options it really cares about
         render['name'] = render_name # perhaps a hack. This is stored here for the asset manager
-        tileSetOpts = util.dict_subset(render, ["name", "imgformat", "renderchecks", "rerenderprob", "bgcolor", "imgquality", "optimizeimg", "rendermode", "worldname_orig", "title", "dimension", "changelist","showspawn", "overlay"])
+        tileSetOpts = util.dict_subset(render, ["name", "imgformat", "renderchecks", "rerenderprob", "bgcolor", "defaultzoom", "imgquality", "optimizeimg", "rendermode", "worldname_orig", "title", "dimension", "changelist","showspawn", "overlay","base", "poititle"])
         tileSetOpts.update({"spawn": w.find_true_spawn()}) # TODO find a better way to do this
-        tset = tileset.TileSet(rset, assetMrg, tex, tileSetOpts, tileset_dir)
+        tset = tileset.TileSet(w, rset, assetMrg, tex, tileSetOpts, tileset_dir)
         tilesets.append(tset)
 
     # Do tileset preprocessing here, before we start dispatching jobs

@@ -216,6 +216,8 @@ the form ``key = value``. Two items take a different form:, ``worlds`` and
 
     **You must specify at least one render**
 
+.. _outputdir:
+
 ``outputdir = "<output directory path>"``
     This is the path to the output directory where the rendered tiles will
     be saved.
@@ -250,12 +252,81 @@ the form ``key = value``. Two items take a different form:, ``worlds`` and
     observer to be used. The observer object is expected to have at least ``start``,
     ``add``, ``update``, and ``finish`` methods.
 
-    e.g.::
+    If you want to specify an observer manually, try something like:
+    ::
 
+        from observer import ProgressBarObserver()
         observer = ProgressBarObserver()
 
-.. _outputdir:
+    There are currently three observers available: ``LoggingObserver``, 
+    ``ProgressBarObserver`` and ``JSObserver``. 
 
+    ``LoggingObserver``
+         This gives the normal/older style output and is the default when output
+         is redirected to a file or when running on Windows
+
+    ``ProgressBarObserver``
+        This is used by default when the output is a terminal. Displays a text based
+        progress bar and some statistics.
+
+    ``JSObserver(outputdir[, minrefresh][, messages])``
+        This will display render progress on the output map in the bottom right
+        corner of the screen. ``JSObserver``.
+
+        * ``outputdir="<output directory path"``
+            Path to overviewer output directory. For simplicity, specify this 
+            as ``outputdir=outputdir`` and place this line after setting
+            ``outputdir = "<output directory path>"``.
+            **Required**
+        
+        * ``minrefresh=<seconds>``
+            Progress information won't be written to file or requested by your
+            web browser more frequently than this interval. 
+
+        * ``messages=dict(totalTiles=<string>, renderCompleted=<string>, renderProgress=<string>)``
+            Customises messages displayed in browser. All three messages must be
+            defined as follows:
+
+            * ``totalTiles="Rendering %d tiles"``
+              The ``%d`` format string will be replaced with the total number of
+              tiles to be rendered.
+
+            * ``renderCompleted="Render completed in %02d:%02d:%02d"``
+              The three format strings  will be replaced with the number of hours.
+              minutes and seconds taken to complete this render.
+
+            * ``renderProgress="Rendered %d of %d tiles (%d%%)"``
+              The three format strings will be replaced with the number of tiles
+              completed, the total number of tiles and the percentage complete
+
+            Format strings are explained here: http://docs.python.org/library/stdtypes.html#string-formatting
+            All format strings must be present in your custom messages.
+
+        ::
+
+                from observer import JSObserver
+                observer = JSObserver(outputdir, 10)
+
+
+.. _customwebassets:
+
+``customwebassets = "<path to custom web assets>"``
+    This option allows you to speciy a directory containing custom web assets
+    to be copied to the output directory. Any files in the custom web assets 
+    directory overwrite the default files.
+
+    If you are providing a custom index.html, the following strings will be replaced:
+
+    * ``{title}``
+      Will be replaced by 'Minecraft Overviewer'
+
+    * ``{time}``
+      Will be replaced by the current date and time when the world is rendered
+      e.g. 'Sun, 12 Aug 2012 15:25:40 BST'
+
+    * ``{version}``
+      Will be replaced by the version of Overviewer used
+      e.g. '0.9.276 (5ff9c50)' 
 
 .. _renderdict:
 
@@ -432,7 +503,20 @@ values. The valid configuration keys are listed below.
 
     **Default:** ``#1a1a1a``
 
-.. _option_texturepath:
+``defaultzoom``
+    This value specifies the default zoom level that the map will be opened
+    with. It has to be greater than 0.
+
+    **Default:** ``1``
+
+``base``
+    Allows you to specify a remote location for the tile folder, useful if you
+    rsync your map's images to a remote server. Leave a trailing slash and point
+    to the location that contains the tile folders for each render, not the
+    tiles folder itself. For example, if the tile images start at
+    http://domain.com/map/world_day/ you want to set this to http://domain.com/map/
+
+.. _option_texture_pack:
 
 ``texturepath``
     This is a where a specific texture pack can be found to be used during this render.
@@ -535,7 +619,7 @@ values. The valid configuration keys are listed below.
 
 ``markers``
     This controls the display of markers, signs, and other points of interest
-    in the output HTML.  It should be a list of filter functions.
+    in the output HTML.  It should be a list of dictionaries.  
 
     .. note::
 
@@ -546,15 +630,21 @@ values. The valid configuration keys are listed below.
 
     **Default:** ``[]`` (an empty list)
 
+
+``poititle``
+    This controls the display name of the POI/marker dropdown control.
+
+    **Default:** "Signs"
+
 .. _option_overlay:
 
 ``overlay``
     This specifies which renders that this render will be displayed on top of. 
-    It should be a list of renders.
+    It should be a list of other renders.  If this option is confusing, think
+    of this option's name as "overlay_on_to".
 
-    .. warning::
-
-       At this time, this feature is not fully implemented.
+    If you leave this as an empty list, this overlay will be displayed on top
+    of all renders for the same world/dimension as this one.
 
     **Default:** ``[]`` (an empty list)
 
@@ -612,6 +702,13 @@ Nether
 HeightFading
     Draws a colored overlay on the blocks that fades them out according to their
     height.
+    
+    **Options**
+    
+    sealevel
+        sealevel of the word you're rendering. Note that the default,
+        128, is usually *incorrect* for most worlds. You should
+        probably set this to 64. Default: 128
 
 Depth
     Only renders blocks between the specified min and max heights.
@@ -623,6 +720,17 @@ Depth
 
     max
         highest level of blocks to render. Default: 255
+
+Exposed
+    Only renders blocks that are exposed (adjacent to a transparent block).
+    
+    **Options**
+    
+    mode
+        when set to 1, inverts the render mode, only drawing unexposed blocks. Default: 0
+        
+NoFluids
+    Don't render fluid blocks (water, lava).
 
 EdgeLines
     Draw edge lines on the back side of blocks, to help distinguish them from
@@ -648,7 +756,7 @@ Hide
 
     **Options**
 
-    minerals
+    blocks
         A list of block ids, or (blockid, data) tuples to hide.
 
 DepthTinting
@@ -680,15 +788,27 @@ ClearBase
     Forces the background to be transparent. Use this in place of Base
     for rendering pure overlays.
 
-    .. warning::
-
-        Overlays are currently not functional in this branch of code. We are
-        working on them. Please inquire in :ref:`IRC<help>` for more information.
-
 SpawnOverlay
     Color the map red in areas where monsters can spawn. Either use
     this on top of other modes, or on top of ClearBase to create a
     pure overlay.
+
+    **Options**
+
+    overlay_color
+        custom color for the overlay in the format (r,g,b,a). If not
+        defined a red color is used.
+
+SlimeOverlay
+    Color the map green in chunks where slimes can spawn. Either use
+    this on top of other modes, or on top of ClearBase to create a
+    pure overlay.
+
+    **Options**
+
+    overlay_color
+        custom color for the overlay in the format (r,g,b,a). If not
+        defined a green color is used.
 
 MineralOverlay
     Color the map according to what minerals can be found
@@ -700,6 +820,25 @@ MineralOverlay
     minerals
         A list of (blockid, (r, g, b)) tuples to use as colors. If not
         provided, a default list of common minerals is used.
+
+        Example::
+
+            MineralOverlay(minerals=[(64,(255,255,0)), (13,(127,0,127))])
+
+BiomeOverlay
+    Color the map according to the biome at that point. Either use on
+    top of other modes or on top of ClearBase to create a pure overlay.
+
+    **Options**
+
+    biomes
+        A list of ("biome name", (r, g, b)) tuples to use as colors. Any
+        biome not specified won't be highlighted. If not provided then 
+        a default list of biomes and colors is used.
+
+        Example::
+
+            BiomeOverlay(biomes=[("Forest", (0, 255, 0)), ("Desert", (255, 0, 0))])
 
 Defining Custom Rendermodes
 ---------------------------

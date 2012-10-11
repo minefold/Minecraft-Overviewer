@@ -1,4 +1,9 @@
 overviewer.util = {
+	
+    // vars for callback
+    readyQueue: [],
+    isReady: false,
+	
     /* fuzz tester!
      */
     'testMaths': function(t) {
@@ -57,6 +62,10 @@ overviewer.util = {
 
         var coordsdiv = new overviewer.views.CoordboxView({tagName: 'DIV'});
         coordsdiv.render();
+
+        var progressdiv = new overviewer.views.ProgressView({tagName: 'DIV'});
+        progressdiv.render();
+        progressdiv.updateProgress();
 
         if (overviewer.collections.haveSigns) {
             var signs = new overviewer.views.SignControlView();
@@ -141,6 +150,13 @@ overviewer.util = {
            overviewer.util.initializeRegions();
            overviewer.util.createMapControls();
            */
+           
+        // run ready callbacks now
+        google.maps.event.addListenerOnce(overviewer.map, 'idle', function(){
+            // ok now..
+            overviewer.util.runReadyQueue();
+            overviewer.util.isReady = true;
+        });
     },
 
     'injectMarkerScript': function(url) {
@@ -153,21 +169,6 @@ overviewer.util = {
         return;
 
     },
-
-    'createMarkerInfoWindow': function(marker) {
-            var windowContent = '<div class="infoWindow"><img src="' + marker.icon +
-                '"/><p>' + marker.title.replace(/\n/g,'<br/>') + '</p></div>';
-            var infowindow = new google.maps.InfoWindow({
-                'content': windowContent
-            });
-            google.maps.event.addListener(marker, 'click', function() {
-                if (overviewer.collections.infoWindow) {
-                    overviewer.collections.infoWindow.close();
-                }
-                infowindow.open(overviewer.map, marker);
-                overviewer.collections.infoWindow = infowindow;
-            });
-        },
 
 
     /**
@@ -206,6 +207,27 @@ overviewer.util = {
             div.style.borderColor = '#AAAAAA';
             return div;
         };
+    },
+    /**
+     * onready function for other scripts that rely on overviewer
+     * usage: overviewer.util.ready(function(){ // do stuff });
+     *
+     *
+     */
+    'ready': function(callback){
+        if (!callback || !_.isFunction(callback)) return;
+        if (overviewer.util.isReady){ // run instantly if overviewer already is ready
+            overviewer.util.readyQueue.push(callback);
+            overviewer.util.runReadyQueue();
+        } else {
+            overviewer.util.readyQueue.push(callback); // wait until initialize is finished
+        }
+    },       
+    'runReadyQueue': function(){
+        _.each(overviewer.util.readyQueue, function(callback){
+            callback();
+        });
+        overviewer.util.readyQueue.length = 0;
     },
     /**
      * Quote an arbitrary string for use in a regex matcher.
@@ -292,15 +314,15 @@ overviewer.util = {
 
         if (north_direction == overviewerConfig.CONST.UPPERRIGHT){
             temp = x;
-            x = -z+16;
+            x = -z+15;
             z = temp;
         } else if(north_direction == overviewerConfig.CONST.LOWERRIGHT){
-            x = -x+16;
-            z = -z+16;
+            x = -x+15;
+            z = -z+15;
         } else if(north_direction == overviewerConfig.CONST.LOWERLEFT){
             temp = x;
             x = z;
-            z = -temp+16;
+            z = -temp+15;
         }
 
         // This information about where the center column is may change with
@@ -381,15 +403,15 @@ overviewer.util = {
 
         if(north_direction == overviewerConfig.CONST.UPPERRIGHT){
             temp = point.z;
-            point.z = -point.x+16;
+            point.z = -point.x+15;
             point.x = temp;
         } else if(north_direction == overviewerConfig.CONST.LOWERRIGHT){
-            point.x = -point.x+16;
-            point.z = -point.z+16;
+            point.x = -point.x+15;
+            point.z = -point.z+15;
         } else if(north_direction == overviewerConfig.CONST.LOWERLEFT){
             temp = point.z;
             point.z = point.x;
-            point.x = -temp+16;
+            point.x = -temp+15;
         }
 
         return point;
@@ -428,15 +450,15 @@ overviewer.util = {
         var windowContent = '<div class="infoWindow"><img src="' + marker.icon +
             '"/><p>' + marker.title.replace(/\n/g,'<br/>') + '</p></div>';
         var infowindow = new google.maps.InfoWindow({
-                'content': windowContent
-                });
+            'content': windowContent
+        });
         google.maps.event.addListener(marker, 'click', function() {
-                if (overviewer.collections.infoWindow) {
+            if (overviewer.collections.infoWindow) {
                 overviewer.collections.infoWindow.close();
-                }
-                infowindow.open(overviewer.map, marker);
-                overviewer.collections.infoWindow = infowindow;
-                });
+            }
+            infowindow.open(overviewer.map, marker);
+            overviewer.collections.infoWindow = infowindow;
+        });
     },
     'initHash': function() {
         if(window.location.hash.split("/").length > 1) {

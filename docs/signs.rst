@@ -93,7 +93,7 @@ of dictionaries.  For example::
             'world': 'myworld',
             'title': "Example",
             'markers': [dict(name="All signs", filterFunction=signFilter),
-                        dict(name="Chests", filterFunction=chestFilter, icon="chest.png")]
+                        dict(name="Chests", filterFunction=chestFilter, icon="chest.png", createInfoWindow=False)]
     }
 
 
@@ -112,6 +112,12 @@ The following keys are accepted in the marker dictionary:
     on the POI itself (this can be done by modifying the POI in the filter function.  See the
     example above)
 
+``createInfoWindow``
+    Optional. Specifies whether or not the icon displays an info window on click. Defaults to True
+
+``checked``
+    Optional.  Specifies whether or not this marker group will be checked(visible) by default when
+    the map loads.  Defaults to False
 
 Generating the POI Markers
 ==========================
